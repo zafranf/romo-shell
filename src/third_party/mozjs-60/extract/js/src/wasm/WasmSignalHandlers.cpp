@@ -272,6 +272,12 @@ struct AutoSignalHandler
 # define RSP_sig(p) ((p)->uc_mcontext->__ss.__rsp)
 # define R14_sig(p) ((p)->uc_mcontext->__ss.__lr)
 # define R15_sig(p) ((p)->uc_mcontext->__ss.__pc)
+# if defined(__aarch64__)
+#  define EPC_sig(p) ((p)->uc_mcontext->__ss.__pc)
+#  define RFP_sig(p) ((p)->uc_mcontext->__ss.__fp)
+#  define RLR_sig(p) ((p)->uc_mcontext->__ss.__lr)
+#  define R31_sig(p) ((p)->uc_mcontext->__ss.__sp)
+# endif
 #else
 # error "Don't know how to read/write to the thread state via the mcontext_t."
 #endif
@@ -403,6 +409,12 @@ struct macos_arm_context {
     arm_neon_state_t float_;
 };
 #  define EMULATOR_CONTEXT macos_arm_context
+# elif defined(__aarch64__)
+struct macos_arm64_context {
+    arm_thread_state64_t thread;
+    arm_neon_state64_t float_;
+};
+#  define EMULATOR_CONTEXT macos_arm64_context
 # else
 #  error Unsupported architecture
 # endif
@@ -496,6 +508,10 @@ ContextToPC(EMULATOR_CONTEXT* context)
     static_assert(sizeof(context->thread.__pc) == sizeof(void*),
                   "stored IP should be compile-time pointer-sized");
     return reinterpret_cast<uint8_t**>(&context->thread.__pc);
+# elif defined(__aarch64__)
+    static_assert(sizeof(context->thread.__pc) == sizeof(void*),
+                  "stored IP should be compile-time pointer-sized");
+    return reinterpret_cast<uint8_t**>(&context->thread.__pc);
 # else
 #  error Unsupported architecture
 # endif
@@ -510,6 +526,8 @@ ContextToFP(EMULATOR_CONTEXT* context)
     return (uint8_t*)context->thread.uts.ts32.__ebp;
 # elif defined(__arm__)
     return (uint8_t*)context->thread.__r[11];
+# elif defined(__aarch64__)
+    return (uint8_t*)context->thread.__fp;
 # else
 #  error Unsupported architecture
 # endif
@@ -531,6 +549,8 @@ ContextToSP(EMULATOR_CONTEXT* context)
 # elif defined(__i386__)
     return (uint8_t*)context->thread.uts.ts32.__esp;
 # elif defined(__arm__)
+    return (uint8_t*)context->thread.__sp;
+# elif defined(__aarch64__)
     return (uint8_t*)context->thread.__sp;
 # else
 #  error Unsupported architecture
@@ -1152,6 +1172,11 @@ HandleMachException(JSContext* cx, const ExceptionRequest& request)
     unsigned int float_state_count = ARM_NEON_STATE_COUNT;
     int thread_state = ARM_THREAD_STATE;
     int float_state = ARM_NEON_STATE;
+# elif defined(__aarch64__)
+    unsigned int thread_state_count = ARM_THREAD_STATE64_COUNT;
+    unsigned int float_state_count = ARM_NEON_STATE64_COUNT;
+    int thread_state = ARM_THREAD_STATE64;
+    int float_state = ARM_NEON_STATE64;
 # else
 #  error Unsupported architecture
 # endif

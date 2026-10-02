@@ -18,6 +18,10 @@ namespace boost { namespace numeric
     ,builtin_to_udt
     ,udt_to_builtin
     ,udt_to_udt
+    // Widen enum range so boost::mpl integral_c next/prior wrappers (value±1)
+    // remain representable as template arguments (clang 16+ rejects out-of-range).
+    ,_udt_mixture_mpl_range_lo = -1
+    ,_udt_mixture_mpl_range_hi = 4
   } ;
 
 } } // namespace boost::numeric

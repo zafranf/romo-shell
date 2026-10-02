@@ -64,6 +64,9 @@
 #include "mongo/transport/session_asio.h"
 
 namespace mongo {
+// Robo 3T/Romo SSH tunnel rewrite lookup (defined in client/dbclient_connection.cpp).
+bool getSshTunnelRewrite(const HostAndPort& target, HostAndPort* rewritten);
+
 namespace transport {
 
 MONGO_FAIL_POINT_DEFINE(transportLayerASIOasyncConnectTimesOut);
@@ -291,7 +294,12 @@ public:
 
     explicit WrappedResolver(asio::io_context& ioCtx) : _resolver(ioCtx) {}
 
-    StatusWith<EndpointVector> resolve(const HostAndPort& peer, bool enableIPv6) {
+    StatusWith<EndpointVector> resolve(const HostAndPort& peerIn, bool enableIPv6) {
+        // Robo 3T/Romo: route SSH-tunneled targets (replica set members) to
+        // their local tunnel endpoints before any DNS resolution.
+        HostAndPort peer = peerIn;
+        if (HostAndPort rewritten; getSshTunnelRewrite(peerIn, &rewritten))
+            peer = rewritten;
         if (auto unixEp = _checkForUnixSocket(peer)) {
             return *unixEp;
         }
@@ -314,7 +322,11 @@ public:
             .getNoThrow();
     }
 
-    Future<EndpointVector> asyncResolve(const HostAndPort& peer, bool enableIPv6) {
+    Future<EndpointVector> asyncResolve(const HostAndPort& peerIn, bool enableIPv6) {
+        // Robo 3T/Romo: route SSH-tunneled targets to their local endpoints.
+        HostAndPort peer = peerIn;
+        if (HostAndPort rewritten; getSshTunnelRewrite(peerIn, &rewritten))
+            peer = rewritten;
         if (auto unixEp = _checkForUnixSocket(peer)) {
             return *unixEp;
         }

@@ -118,7 +118,7 @@ namespace boost
 {
     namespace hash_detail
     {
-#if defined(_HAS_AUTO_PTR_ETC) && !_HAS_AUTO_PTR_ETC
+#if 1 // clang 21/libc++ removed std::unary_function; use typedef-based hash_base
         template <typename T>
         struct hash_base
         {

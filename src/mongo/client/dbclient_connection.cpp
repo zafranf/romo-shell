@@ -38,6 +38,9 @@
 #include "mongo/client/dbclient_connection.h"
 
 #include <algorithm>
+#include <cctype>
+#include <fstream>
+#include <mutex>
 #include <utility>
 
 #include "mongo/base/status.h"
@@ -299,6 +302,33 @@ Status DBClientConnection::connect(const HostAndPort& serverAddress, StringData 
     return Status::OK();
 }
 
+namespace {
+// Robo 3T/Romo SSH tunnel: host:port -> local tunnel endpoint (see header).
+std::mutex g_sshTunnelRewriteMutex;
+std::map<std::string, std::pair<std::string, int>> g_sshTunnelRewrites;
+
+std::string sshTunnelRewriteKey(const HostAndPort& hostAndPort) {
+    std::string host = hostAndPort.host();
+    std::transform(host.begin(), host.end(), host.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return host + ":" + std::to_string(hostAndPort.port());
+}
+}  // namespace
+
+void addSshTunnelRewriteMap(const std::map<std::string, std::pair<std::string, int>>& rewrites) {
+    std::lock_guard<std::mutex> lk(g_sshTunnelRewriteMutex);
+    g_sshTunnelRewrites.insert(rewrites.begin(), rewrites.end());
+}
+
+bool getSshTunnelRewrite(const HostAndPort& target, HostAndPort* rewritten) {
+    std::lock_guard<std::mutex> lk(g_sshTunnelRewriteMutex);
+    auto const it = g_sshTunnelRewrites.find(sshTunnelRewriteKey(target));
+    if (it == g_sshTunnelRewrites.end())
+        return false;
+    *rewritten = HostAndPort(it->second.first, it->second.second);
+    return true;
+}
+
 Status DBClientConnection::connectSocketOnly(const HostAndPort& serverAddress) {
     _serverAddress = serverAddress;
     _markFailed(kReleaseSession);
@@ -321,6 +351,17 @@ Status DBClientConnection::connectSocketOnly(const HostAndPort& serverAddress) {
                       str::stream() << "couldn't connect to server " << _serverAddress.toString()
                                     << ", address resolved to 0.0.0.0");
     }
+
+    // Robo 3T/Romo: route this dial through a local SSH tunnel endpoint when a
+    // rewrite is registered for the requested host:port. _serverAddress above
+    // keeps the original address for error reporting.
+    HostAndPort dialAddress = serverAddress;
+    {
+        std::lock_guard<std::mutex> lk(g_sshTunnelRewriteMutex);
+        auto const rewrite = g_sshTunnelRewrites.find(sshTunnelRewriteKey(serverAddress));
+        if (rewrite != g_sshTunnelRewrites.end())
+            dialAddress = HostAndPort(rewrite->second.first, rewrite->second.second);
+    }
     
     // Robo 1.3: Robo needs to re-initiate SSLManager with each connection request
     if (mongo::sslGlobalParams.sslMode.load() == mongo::SSLParams::SSLMode_requireSSL &&
@@ -329,7 +370,7 @@ Status DBClientConnection::connectSocketOnly(const HostAndPort& serverAddress) {
         return{ ErrorCodes::InvalidSSLConfiguration, "SSLManager reinitiateSSLManager() failed" };
 
     auto sws = getGlobalServiceContext()->getTransportLayer()->connect(
-        serverAddress, _uri.getSSLMode(), _socketTimeout.value_or(Milliseconds{5000}));
+        dialAddress, _uri.getSSLMode(), _socketTimeout.value_or(Milliseconds{5000}));
     if (!sws.isOK()) {
         return Status(ErrorCodes::HostUnreachable,
                       str::stream() << "couldn't connect to server " << _serverAddress.toString()

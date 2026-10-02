@@ -56,6 +56,10 @@
 #include "mongo/util/hierarchical_acquisition.h"
 #include "mongo/util/str.h"
 
+#include <map>
+#include <string>
+#include <utility>
+
 namespace mongo {
 
 namespace executor {
@@ -73,6 +77,21 @@ class DBClientCursorBatchIterator;
  *  exception, it is legal to call shutdownAndDisallowReconnect() from any thread as a way to
  *  interrupt the owning thread.
  */
+/**
+ * Optional host:port rewrite map so an embedding application (Robo 3T/Romo) can
+ * route replica set member dials through local SSH tunnel endpoints.
+ * Key: "host:port" with lowercased host, value: replacement host and port.
+ * Entries accumulate across calls and are applied in
+ * DBClientConnection::connectSocketOnly() before the socket is opened.
+ */
+void addSshTunnelRewriteMap(const std::map<std::string, std::pair<std::string, int>>& rewrites);
+
+/**
+ * Looks up a registered rewrite for 'target'. Returns true and fills
+ * 'rewritten' when the target host:port is routed through an SSH tunnel.
+ */
+bool getSshTunnelRewrite(const HostAndPort& target, HostAndPort* rewritten);
+
 class DBClientConnection : public DBClientBase {
 public:
     using DBClientBase::query;

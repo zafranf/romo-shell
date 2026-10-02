@@ -18,6 +18,10 @@ namespace boost { namespace numeric
     ,integral_to_float
     ,float_to_integral
     ,float_to_float
+    // Widen enum range so boost::mpl integral_c next/prior wrappers (value±1)
+    // remain representable as template arguments (clang 16+ rejects out-of-range).
+    ,_int_float_mixture_mpl_range_lo = -1
+    ,_int_float_mixture_mpl_range_hi = 4
   } ;
 
 } } // namespace boost::numeric
